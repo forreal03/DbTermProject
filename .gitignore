@@ -1,1 +1,42 @@
+# 환경 변수 및 비밀 키
 .env
+.env.local
+
+# 가상환경
+venv/
+env/
+ENV/
+.venv
+
+# Python 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 데이터베이스 파일 (선택사항 - 팀 정책에 따라)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE 설정 파일
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS 생성 파일
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 테스트 및 커버리지
+.coverage
+htmlcov/
+.pytest_cache/
+
+# 빌드 파일
+dist/
+build/
+*.egg-info/
