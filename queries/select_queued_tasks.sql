@@ -3,7 +3,6 @@ SELECT
     KTQ.queue_task_id,
     KTQ.task_definition_id,
     MT.workstation_id,
-    MT.difficulty_level,
     OI.menu_item_id
 FROM KitchenTaskQueue KTQ
 JOIN MenuTasks MT ON KTQ.task_definition_id = MT.task_definition_id

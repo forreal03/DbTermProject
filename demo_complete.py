@@ -76,44 +76,90 @@ def insert_initial_data(conn):
     print(Fore.GREEN + "✅ 기본 데이터 삽입 완료!\n")
 
 def demo_customer_orders(conn):
-    """고객 주문 접수 및 OrderItems 생성"""
+    """고객 주문 접수 및 대기 시간 계산"""
     print(Fore.MAGENTA + "="*80)
-    print("🛒 [주문 단계] 고객 주문 접수")
+    print("🛒 [주문 단계] 고객 주문 접수 및 영수증 발행")
     print("="*80)
-    
+
     cursor = conn.cursor()
-    
+
+    # 메뉴 정보 미리 가져오기
+    cursor.execute("SELECT menu_item_id, name, price FROM MenuItems")
+    menu_dict = {mid: (name, price) for mid, name, price in cursor.fetchall()}
+
     orders = [
         {'name': 'ORD-001', 'items': [(1, 1)]},              # 싸이버거 1개
         {'name': 'ORD-002', 'items': [(2, 2), (5, 1)]},      # 싸이버거 세트 2개, 텐더 1개
         {'name': 'ORD-003', 'items': [(3, 1)]},              # 에드워드리 버거 1개
         {'name': 'ORD-004', 'items': [(4, 1), (1, 1)]},      # 에드워드리 세트 1개, 싸이버거 1개
     ]
-    
-    print("\n📍 주문 처리 중...")
+
     insert_order_sql = load_sql('insert_order.sql')
     insert_order_item_sql = load_sql('insert_order_item.sql')
 
     for order_info in orders:
-        cursor.execute(insert_order_sql, (order_info['name'],))
+        print(Fore.CYAN + f"\n{'='*60}")
+        print(f"📝 고객 주문: {order_info['name']}")
+        print(f"{'='*60}")
 
+        # 주문 생성
+        cursor.execute(insert_order_sql, (order_info['name'],))
         order_id = cursor.lastrowid
 
-        # OrderItems 생성
+        # 주문 내역 및 총액 계산
+        total_price = 0
+        order_summary = []
         for menu_id, qty in order_info['items']:
             cursor.execute(insert_order_item_sql, (order_id, menu_id, qty))
+            menu_name, price = menu_dict[menu_id]
+            subtotal = price * qty
+            total_price += subtotal
+            order_summary.append((menu_name, qty, subtotal))
 
         conn.commit()
-        print(f"  ✅ {order_info['name']} 접수")
 
-    # 주문 현황 표시
-    print("\n📍 주문 현황:")
-    select_order_summary_sql = load_sql('select_order_summary.sql')
-    cursor.execute(select_order_summary_sql)
-    orders_data = cursor.fetchall()
-    print(tabulate(orders_data, headers=["주문ID", "주문번호", "상태", "항목수"], tablefmt="grid"))
-    
-    print(Fore.GREEN + "\n✅ 주문 접수 완료!\n")
+        # 대기 시간 계산
+        cursor.execute("""
+            SELECT COALESCE(SUM(MT.base_time_seconds * OI.quantity), 0)
+            FROM OrderItems OI
+            JOIN MenuTasks MT ON OI.menu_item_id = MT.menu_item_id
+            WHERE OI.order_id = ?
+        """, (order_id,))
+        my_order_time = cursor.fetchone()[0]
+
+        # 앞 주문들의 남은 시간 계산
+        cursor.execute("""
+            SELECT COALESCE(SUM(MT.base_time_seconds * OI.quantity), 0)
+            FROM CustomerOrders CO
+            JOIN OrderItems OI ON CO.order_id = OI.order_id
+            JOIN MenuTasks MT ON OI.menu_item_id = MT.menu_item_id
+            WHERE CO.status IN ('PENDING', 'CONFIRMED')
+            AND CO.order_id < ?
+        """, (order_id,))
+        queue_time = cursor.fetchone()[0]
+
+        total_wait_time = queue_time + my_order_time
+        wait_minutes = total_wait_time // 60
+
+        # 영수증 출력
+        print(Fore.GREEN + "\n📄 영수증")
+        print("-" * 60)
+        for name, qty, subtotal in order_summary:
+            print(f"  {name:25s} x {qty:2d}  {subtotal:7,}원")
+        print("-" * 60)
+        print(f"  {'합계':25s}      {total_price:7,}원")
+        print("=" * 60)
+
+        print(Fore.YELLOW + f"⏰ 예상 대기 시간: 약 {wait_minutes}분")
+        if queue_time > 0:
+            queue_minutes = queue_time // 60
+            print(Fore.CYAN + f"   (현재 {queue_minutes}분 대기 중인 주문이 있습니다)")
+
+        print(Fore.GREEN + f"✅ 주문번호: {order_info['name']}" + Style.RESET_ALL)
+
+    print(Fore.GREEN + "\n" + "="*80)
+    print("✅ 모든 주문 접수 완료!")
+    print("="*80 + Style.RESET_ALL + "\n")
 
 def demo_task_queue_creation(conn):
     """KitchenTaskQueue 자동 생성 (각 OrderItem마다 관련 MenuTasks 추가)"""
@@ -180,9 +226,9 @@ def demo_resource_assignment(conn):
     tasks = cursor.fetchall()
     assigned_count = 0
 
-    for queue_id, task_def_id, workstation_id, difficulty, menu_id in tasks:
-        # 1. Staff 할당 (skill_level >= difficulty_level인 활동중인 스태프, 중복 방지)
-        cursor.execute(select_available_staff_sql, (workstation_id, difficulty))
+    for queue_id, task_def_id, workstation_id, menu_id in tasks:
+        # 1. Staff 할당 (활동중인 스태프, 중복 할당 방지)
+        cursor.execute(select_available_staff_sql, (workstation_id,))
 
         staff_result = cursor.fetchone()
         assigned_staff_id = staff_result[0] if staff_result else None
@@ -384,23 +430,21 @@ def demo_final_report(conn):
     # 5. Staff
     print("\n✅ [5] Staff - 스태프 정보")
     cursor.execute("""
-        SELECT staff_id, name, skill_level, status FROM Staff
+        SELECT staff_id, name, status FROM Staff
     """)
     data = cursor.fetchall()
-    skill_map = {1: '초보', 2: '숙련', 3: '마스터'}
-    data = [(id, name, skill_map.get(level, level), status) for id, name, level, status in data]
-    print(tabulate(data, headers=["Staff ID", "이름", "숙련도", "상태"], tablefmt="grid"))
-    
+    print(tabulate(data, headers=["Staff ID", "이름", "상태"], tablefmt="grid"))
+
     # 6. StaffAssignment
     print("\n✅ [6] StaffAssignment - 스태프 배치")
     cursor.execute("""
-        SELECT SA.assignment_id, S.name, W.name, SA.assigned_difficulty, SA.assigned_at
+        SELECT SA.assignment_id, S.name, W.name, SA.assigned_at
         FROM StaffAssignment SA
         JOIN Staff S ON SA.staff_id = S.staff_id
         JOIN Workstations W ON SA.workstation_id = W.workstation_id
     """)
     data = cursor.fetchall()
-    print(tabulate(data, headers=["Assignment ID", "스태프", "작업장", "난이도", "할당시간"], tablefmt="grid"))
+    print(tabulate(data, headers=["Assignment ID", "스태프", "작업장", "할당시간"], tablefmt="grid"))
     
     # 7. MenuItems
     print("\n✅ [7] MenuItems - 메뉴")
@@ -411,16 +455,16 @@ def demo_final_report(conn):
     print(tabulate(data, headers=["Menu ID", "메뉴명", "가격"], tablefmt="grid"))
     
     # 8. MenuTasks
-    print("\n✅ [8] MenuTasks - 메뉴 작업 정의 (difficulty_level, base_time_seconds, task_type 사용)")
+    print("\n✅ [8] MenuTasks - 메뉴 작업 정의 (base_time_seconds, task_type 사용)")
     cursor.execute("""
-        SELECT MT.task_definition_id, MI.name, MT.task_name, MT.task_order, 
-               MT.difficulty_level, MT.base_time_seconds, MT.task_type
+        SELECT MT.task_definition_id, MI.name, MT.task_name, MT.task_order,
+               MT.base_time_seconds, MT.task_type
         FROM MenuTasks MT
         JOIN MenuItems MI ON MT.menu_item_id = MI.menu_item_id
         LIMIT 12
     """)
     data = cursor.fetchall()
-    print(tabulate(data, headers=["Task ID", "메뉴", "작업명", "순서", "난이도", "초(s)", "타입"], tablefmt="grid"))
+    print(tabulate(data, headers=["Task ID", "메뉴", "작업명", "순서", "초(s)", "타입"], tablefmt="grid"))
     
     # 9. TaskDependencies
     print("\n✅ [9] TaskDependencies - 작업 의존성 (Topological Sort)")

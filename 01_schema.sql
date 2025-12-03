@@ -43,7 +43,6 @@ CREATE TABLE ZoneRealtimeState (
 CREATE TABLE Staff (
     staff_id INTEGER PRIMARY KEY AUTOINCREMENT,
     name VARCHAR(100) NOT NULL,
-    skill_level INT NOT NULL DEFAULT 1 CHECK(skill_level BETWEEN 1 AND 3),
     status VARCHAR(20) DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'BREAK', 'OFF_WORK'))
 );
 
@@ -52,7 +51,6 @@ CREATE TABLE StaffAssignment (
     assignment_id INTEGER PRIMARY KEY AUTOINCREMENT,
     staff_id INT NOT NULL,
     workstation_id INT NOT NULL,
-    assigned_difficulty INT DEFAULT 1,
     assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (staff_id) REFERENCES Staff(staff_id),
     FOREIGN KEY (workstation_id) REFERENCES Workstations(workstation_id)
@@ -72,7 +70,6 @@ CREATE TABLE MenuTasks (
     workstation_id INT NOT NULL,
     task_name VARCHAR(100) NOT NULL,
     task_order INT NOT NULL,
-    difficulty_level INT NOT NULL DEFAULT 1 CHECK(difficulty_level BETWEEN 1 AND 3),
     base_time_seconds INT NOT NULL,
     task_type VARCHAR(10) NOT NULL DEFAULT 'ACTIVE' CHECK(task_type IN ('ACTIVE', 'PASSIVE')),
     FOREIGN KEY (menu_item_id) REFERENCES MenuItems(menu_item_id),
